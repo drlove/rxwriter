@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Global base ────────────────────────────────────────────────────────── */
+
+html, body {
+  @apply antialiased;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+/* ─── Print: hide entire app shell, show only the Rx card ───────────────── */
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  /* Ensure the print card fills the 5×7 page exactly */
+  @page {
+    size: 5in 7in;
+    margin: 0.25in;
+  }
+
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
