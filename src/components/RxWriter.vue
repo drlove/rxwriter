@@ -166,7 +166,7 @@ async function save(andPrint = false) {
       age: age.value,
       sex: sex.value,
       date: date.value,
-      medications: [...medications],
+      medications: medications.map((m) => ({ ...m })),
       physician: { ...physician },
       signatureBase64: signatureBase64.value,
       notes: notes.value,
