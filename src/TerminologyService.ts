@@ -1,109 +1,77 @@
 import type { OntoResult } from './types'
 
-/**
- * TerminologyService
- *
- * Wraps the HL7 FHIR Terminology Service API against CSIRO's public Ontoserver.
- * All calls are best-effort: when offline or on error, an empty array is returned
- * so the form remains fully usable without network access.
- *
- * Default endpoint: https://r4.ontoserver.csiro.au/fhir
- * Override via VITE_FHIR_BASE_URL env var (e.g. your PH Core Profile server).
- */
+const RXNORM_SYSTEM = 'http://www.nlm.nih.gov/research/umls/rxnorm'
+const RXNAV_BASE = 'https://rxnav.nlm.nih.gov/REST'
 
-const FHIR_BASE = (import.meta.env.VITE_FHIR_BASE_URL as string | undefined)
-  ?? 'https://r4.ontoserver.csiro.au/fhir'
+// TTY classes to surface: ingredients (IN) and clinical drug components (SCDC)
+const ALLOWED_TTY = new Set(['IN', 'PIN', 'SCDC', 'SCD'])
 
-// SNOMED CT drug concepts ValueSet URL (Clinical Finding / Pharmaceutical subset)
-const SNOMED_DRUG_VALUESET = 'http://snomed.info/sct?fhir_vs=isa/373873005'
-
-// RxNorm Clinical Drug ValueSet — VSAC / NLM hosted
-const RXNORM_VALUESET = 'http://cts.nlm.nih.gov/fhir/ValueSet/2.16.840.1.113762.1.4.1010.4'
-
-type SearchSystem = 'snomed' | 'rxnorm'
-
-interface FHIRBundle {
-  resourceType: string
-  expansion?: {
-    contains?: Array<{
-      system?: string
-      code?: string
-      display?: string
+interface RxNavDrugResponse {
+  drugGroup?: {
+    conceptGroup?: Array<{
+      tty?: string
+      conceptProperties?: Array<{
+        rxcui?: string
+        name?: string
+        tty?: string
+      }>
     }>
   }
 }
 
 /**
- * Expand a ValueSet and return matching drug concepts.
- *
- * @param term   The drug name fragment to search for (e.g. "amox")
- * @param system Which coding system to search ('snomed' | 'rxnorm')
- * @param count  Maximum results to return (default 10)
+ * Search RxNorm for drug concepts matching the given term.
+ * Uses the NLM RxNav REST API — free, no API key required.
+ * Falls back to empty array when offline or on error.
  */
-export async function searchDrug(
-  term: string,
-  system: SearchSystem = 'snomed',
-  count = 10,
-): Promise<OntoResult[]> {
+export async function searchDrug(term: string, count = 10): Promise<OntoResult[]> {
   if (!term.trim()) return []
 
-  const valueSetUrl = system === 'snomed' ? SNOMED_DRUG_VALUESET : RXNORM_VALUESET
-  const url = new URL(`${FHIR_BASE}/ValueSet/$expand`)
-  url.searchParams.set('url', valueSetUrl)
-  url.searchParams.set('filter', term.trim())
-  url.searchParams.set('count', String(count))
-  url.searchParams.set('includeDesignations', 'false')
+  const url = new URL(`${RXNAV_BASE}/drugs.json`)
+  url.searchParams.set('name', term.trim())
 
   try {
     const res = await fetch(url.toString(), {
-      headers: { Accept: 'application/fhir+json' },
       signal: AbortSignal.timeout(5000),
     })
 
     if (!res.ok) return []
 
-    const bundle: FHIRBundle = await res.json()
-    const contains = bundle.expansion?.contains ?? []
+    const data: RxNavDrugResponse = await res.json()
+    const groups = data.drugGroup?.conceptGroup ?? []
 
-    return contains
-      .filter((c) => c.code && c.display && c.system)
-      .map((c) => ({
-        code: c.code!,
-        display: c.display!,
-        system: c.system!,
-      }))
+    const results: OntoResult[] = []
+    for (const group of groups) {
+      if (!group.tty || !ALLOWED_TTY.has(group.tty)) continue
+      for (const c of group.conceptProperties ?? []) {
+        if (!c.rxcui || !c.name) continue
+        results.push({ code: c.rxcui, display: c.name, system: RXNORM_SYSTEM })
+        if (results.length >= count) break
+      }
+      if (results.length >= count) break
+    }
+
+    return results
   } catch {
-    // Offline or timeout — degrade silently
     return []
   }
 }
 
 /**
- * Look up a single concept by code to get its canonical display name.
- * Used to verify / refresh a stored code after coming back online.
+ * Look up a single RxNorm concept by RXCUI.
  */
-export async function lookupCode(
-  code: string,
-  system: string,
-): Promise<OntoResult | null> {
-  const url = new URL(`${FHIR_BASE}/CodeSystem/$lookup`)
-  url.searchParams.set('system', system)
-  url.searchParams.set('code', code)
+export async function lookupCode(code: string): Promise<OntoResult | null> {
+  const url = new URL(`${RXNAV_BASE}/rxcui/${encodeURIComponent(code)}/property.json`)
+  url.searchParams.set('propName', 'RxNorm Name')
 
   try {
-    const res = await fetch(url.toString(), {
-      headers: { Accept: 'application/fhir+json' },
-      signal: AbortSignal.timeout(5000),
-    })
-
+    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(5000) })
     if (!res.ok) return null
 
-    // Parameters resource — extract display name
-    const params: { parameter?: Array<{ name: string; valueString?: string }> } =
+    const data: { propConceptGroup?: { propConcept?: Array<{ propValue?: string }> } } =
       await res.json()
-    const display = params.parameter?.find((p) => p.name === 'display')?.valueString ?? ''
-
-    return display ? { code, display, system } : null
+    const name = data.propConceptGroup?.propConcept?.[0]?.propValue
+    return name ? { code, display: name, system: RXNORM_SYSTEM } : null
   } catch {
     return null
   }

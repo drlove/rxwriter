@@ -100,15 +100,8 @@ function selectSuggestion(idx: number, result: OntoResult) {
   medications[idx].genericName = result.display
   medications[idx].codingDisplay = result.display
   medications[idx].codingSystem = result.system
-
-  if (result.system === 'http://snomed.info/sct') {
-    medications[idx].snomedCode = result.code
-  } else if (result.system.includes('rxnorm')) {
-    medications[idx].rxnormCode = result.code
-  } else {
-    medications[idx].snomedCode = result.code
-  }
-
+  medications[idx].rxnormCode = result.code
+  medications[idx].snomedCode = ''
   autocomplete[idx].open = false
 }
 
@@ -278,16 +271,9 @@ async function save(andPrint = false) {
             <label class="block text-xs font-medium text-gray-600 mb-1">
               Generic Name
               <span
-                v-if="med.snomedCode"
-                class="ml-1 text-green-600 font-normal"
-                :title="`SNOMED CT: ${med.snomedCode}`"
-              >
-                ✓ SNOMED
-              </span>
-              <span
-                v-else-if="med.rxnormCode"
+                v-if="med.rxnormCode"
                 class="ml-1 text-blue-600 font-normal"
-                :title="`RxNorm: ${med.rxnormCode}`"
+                :title="`RxNorm RXCUI: ${med.rxnormCode}`"
               >
                 ✓ RxNorm
               </span>
@@ -312,7 +298,7 @@ async function save(andPrint = false) {
                 v-if="autocomplete[idx].loading"
                 class="px-3 py-2 text-xs text-gray-400 italic"
               >
-                Searching Ontoserver…
+                Searching RxNorm…
               </div>
               <button
                 v-for="(result, ri) in autocomplete[idx].results"
@@ -324,9 +310,7 @@ async function save(andPrint = false) {
               >
                 <span class="font-medium">{{ result.display }}</span>
                 <span class="ml-2 text-xs text-gray-400">{{ result.code }}</span>
-                <span class="ml-1 text-xs text-gray-300">
-                  {{ result.system.includes('snomed') ? 'SNOMED' : 'RxNorm' }}
-                </span>
+                <span class="ml-1 text-xs text-gray-300">RxNorm</span>
               </button>
             </div>
           </div>
